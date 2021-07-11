@@ -9,3 +9,9 @@ GetPortVal
 SetPortVal
 InstallWinIoDriver
 RemoveWinIoDriver
+CheckLoadedWinIo
+ShutdownWinIoEx
+AllocContigMem
+FreeContigMem
+MapContigMem
+UnmapContigMem

@@ -12,8 +12,14 @@
 extern "C"
 {
   WINIO_API bool _stdcall InitializeWinIo();
+  WINIO_API bool _stdcall CheckLoadedWinIo();
   WINIO_API void _stdcall ShutdownWinIo();
+  WINIO_API void _stdcall ShutdownWinIoEx(bool remove_driver);
   WINIO_API PBYTE _stdcall MapPhysToLin(tagPhysStruct &PhysStruct);
+  WINIO_API bool _stdcall AllocContigMem(tagAllocStruct &AllocStruct, DWORD StructSize);
+  WINIO_API bool _stdcall FreeContigMem(tagAllocStruct &AllocStruct, DWORD StructSize);
+  WINIO_API bool _stdcall MapContigMem(tagAllocStruct &AllocStruct, DWORD StructSize);
+  WINIO_API bool _stdcall UnmapContigMem(tagAllocStruct &AllocStruct, DWORD StructSize);
   WINIO_API bool _stdcall UnmapPhysicalMemory(tagPhysStruct &PhysStruct);
   WINIO_API bool _stdcall GetPhysLong(PBYTE pbPhysAddr, PDWORD pdwPhysVal);
   WINIO_API bool _stdcall SetPhysLong(PBYTE pbPhysAddr, DWORD dwPhysVal);

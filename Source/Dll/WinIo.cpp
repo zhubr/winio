@@ -15,6 +15,7 @@
 
 HANDLE hDriver = INVALID_HANDLE_VALUE;
 bool IsWinIoInitialized = false;
+bool SkipUnloadOnShutdown = false;
 wchar_t szWinIoDriverPath[32768];
 bool g_Is64BitOS;
 
@@ -92,6 +93,26 @@ bool GetDriverPath()
 }
 
 
+bool __stdcall CheckLoadedWinIo()
+{
+	bool res = FALSE;
+	HANDLE tmphDriver = 
+		CreateFile(L"\\\\.\\WINIO",
+		GENERIC_READ | GENERIC_WRITE,
+		0,
+		NULL,
+		OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL,
+		NULL);
+
+	if (tmphDriver != INVALID_HANDLE_VALUE) {
+		res = TRUE;
+		CloseHandle(tmphDriver);
+        }
+	return res;
+}
+
+
 bool __stdcall InitializeWinIo()
 {
 	bool bResult;
@@ -134,6 +155,7 @@ bool __stdcall InitializeWinIo()
 		if (hDriver == INVALID_HANDLE_VALUE)
 			return false;
 	}
+	else SkipUnloadOnShutdown = true;
 
 	// Enable I/O port access for this process if running on a 32 bit OS
 
@@ -152,7 +174,7 @@ bool __stdcall InitializeWinIo()
 }
 
 
-void _stdcall ShutdownWinIo()
+void _stdcall ShutdownWinIoEx(bool remove_driver)
 {
 	DWORD dwBytesReturned;
 
@@ -170,7 +192,15 @@ void _stdcall ShutdownWinIo()
 
 	}
 
-	RemoveWinIoDriver();
+	if (remove_driver) RemoveWinIoDriver();
 
 	IsWinIoInitialized = false;
+	SkipUnloadOnShutdown = false;
+}
+
+
+void _stdcall ShutdownWinIo() {
+
+	ShutdownWinIoEx(!SkipUnloadOnShutdown);
+
 }

@@ -30,6 +30,83 @@ void Ke386IoSetAccessProcess(PEPROCESS, int);
 
 // -----------------------------------------------------------------
 
+struct tagAllocStruct curr_blocks[WINIO_ALLOC_LIMIT];
+
+
+void AllocContigMemory(int blk_idx, struct tagAllocStruct *blk) {
+
+	PHYSICAL_ADDRESS   tmpPhys, tmpZero;
+
+	tmpZero.QuadPart = 0;
+	tmpPhys.QuadPart = blk->pvPhysMask;
+	blk->pvKrnlAddress = MmAllocateContiguousMemorySpecifyCache(blk->dwPhysMemSizeInBytes, tmpZero, tmpPhys, tmpZero, blk->MappingFlags);
+        if (blk->pvKrnlAddress) {
+		blk->AllocIndex = blk_idx;
+		tmpPhys = MmGetPhysicalAddress((PVOID)blk->pvKrnlAddress);
+		blk->pvPhysAddress = tmpPhys.QuadPart;
+        }
+}
+
+void FreeContigMemory(int blk_idx, struct tagAllocStruct *blk) {
+
+	if (blk->pvKrnlAddress && !blk->pvMdl) {
+		blk->AllocIndex = 0;
+		MmFreeContiguousMemory((PVOID)blk->pvKrnlAddress);
+		blk->pvKrnlAddress = 0;
+		blk->pvPhysAddress = 0;
+	}
+
+}
+
+void MapContigMemory(int blk_idx, struct tagAllocStruct *blk, PFILE_OBJECT FileObject) {
+
+        if (blk->AllocIndex && blk->pvKrnlAddress && !blk->pvMdl && !blk->pvPhysMemLin) {
+		blk->pvMdl = (DWORD64)IoAllocateMdl((PVOID)blk->pvKrnlAddress, blk->dwPhysMemSizeInBytes, FALSE, FALSE, NULL);
+		if (blk->pvMdl) {
+			blk->pvFileObj = (DWORD64)FileObject;
+			MmBuildMdlForNonPagedPool((PMDL)blk->pvMdl);
+			blk->pvPhysMemLin = (DWORD64)MmMapLockedPagesSpecifyCache((PMDL)blk->pvMdl, UserMode, blk->MappingFlags, NULL, FALSE, NormalPagePriority);
+		}
+        }
+}
+
+void UnmapContigMemory(int blk_idx, struct tagAllocStruct *blk) {
+
+        if (blk->pvPhysMemLin) {
+
+		MmUnmapLockedPages((PVOID)blk->pvPhysMemLin, (PMDL)blk->pvMdl);
+		blk->pvPhysMemLin = 0;
+
+        }
+
+	if (blk->pvMdl) {
+		IoFreeMdl((PMDL)blk->pvMdl);
+		blk->pvMdl = 0;
+	}
+
+	blk->pvFileObj = 0;
+}
+
+void UnmapContigMemoryAll(PFILE_OBJECT FileObject) {
+
+        int blk_num;
+
+	for (blk_num = 0; blk_num < WINIO_ALLOC_LIMIT; blk_num++) if (curr_blocks[blk_num].AllocIndex != 0)
+		if (curr_blocks[blk_num].pvFileObj == (DWORD64)FileObject)
+			UnmapContigMemory(blk_num+1, &curr_blocks[blk_num]);
+}
+
+void FreeContigMemoryAll() {
+
+        int blk_num;
+
+	for (blk_num = 0; blk_num < WINIO_ALLOC_LIMIT; blk_num++) if (curr_blocks[blk_num].AllocIndex != 0) {
+		UnmapContigMemory(blk_num+1, &curr_blocks[blk_num]);
+		FreeContigMemory(blk_num+1, &curr_blocks[blk_num]);
+        }
+}
+
+
 // Installable driver initialization entry point.
 // This entry point is called directly by the I/O system.
 
@@ -43,6 +120,7 @@ NTSTATUS DriverEntry (IN PDRIVER_OBJECT DriverObject,
 
 	KdPrint(("Entering DriverEntry"));
 
+	memset(curr_blocks, 0, sizeof(curr_blocks));
 	RtlInitUnicodeString (&DeviceNameUnicodeString, L"\\Device\\WinIo");
 
 	// Create a device object 
@@ -108,6 +186,7 @@ NTSTATUS WinIoDispatch(IN PDEVICE_OBJECT DeviceObject,
 	IOPM*			   pIOPM = NULL;
 	struct             tagPhysStruct PhysStruct;
 	struct             tagPortStruct PortStruct;
+        struct             tagAllocStruct AllocStruct;
 	struct             tagPhysStruct32 *pPhysStruct32 = NULL;
 
 	KdPrint(("Entering WinIoDispatch"));
@@ -136,6 +215,7 @@ NTSTATUS WinIoDispatch(IN PDEVICE_OBJECT DeviceObject,
 	case IRP_MJ_CLOSE:
 
 		KdPrint(("IRP_MJ_CLOSE"));
+		UnmapContigMemoryAll(IrpStack->FileObject);
 
 		break;
 
@@ -288,6 +368,134 @@ NTSTATUS WinIoDispatch(IN PDEVICE_OBJECT DeviceObject,
 
 		break;
 
+	case IOCTL_WINIO_CNTGALLOC:
+
+		KdPrint(("IOCTL_WINIO_CNTGALLOC"));
+
+		if ((dwInputBufferLength >= 8*4) && (dwOutputBufferLength >= 8*6))
+		{
+			if (dwInputBufferLength > sizeof(AllocStruct)) dwInputBufferLength = sizeof(AllocStruct);
+			if (dwOutputBufferLength > sizeof(AllocStruct)) dwOutputBufferLength = sizeof(AllocStruct);
+			memset (&AllocStruct, 0, sizeof(AllocStruct));
+			memcpy (&AllocStruct, pvIOBuffer, dwInputBufferLength);
+
+			if ((AllocStruct.AllocIndex > 0) && (AllocStruct.AllocIndex <= WINIO_ALLOC_LIMIT)) {
+
+				if ((0 == curr_blocks[AllocStruct.AllocIndex-1].AllocIndex) && (0 != AllocStruct.dwPhysMemSizeInBytes)) {
+                                        memset (&curr_blocks[AllocStruct.AllocIndex-1], 0, sizeof(curr_blocks[0]));
+					curr_blocks[AllocStruct.AllocIndex-1].dwPhysMemSizeInBytes = AllocStruct.dwPhysMemSizeInBytes;
+					curr_blocks[AllocStruct.AllocIndex-1].pvPhysMask = AllocStruct.pvPhysMask;
+					curr_blocks[AllocStruct.AllocIndex-1].MappingFlags = AllocStruct.MappingFlags;
+					AllocContigMemory((int)AllocStruct.AllocIndex, &curr_blocks[AllocStruct.AllocIndex-1]);
+				}
+				if (AllocStruct.AllocIndex == curr_blocks[AllocStruct.AllocIndex-1].AllocIndex) {
+					memcpy (pvIOBuffer, &curr_blocks[AllocStruct.AllocIndex-1], dwOutputBufferLength);
+					Irp->IoStatus.Information = dwOutputBufferLength;
+					Irp->IoStatus.Status = STATUS_SUCCESS;
+				}
+
+			} else {
+                                AllocStruct.AllocIndex = WINIO_ALLOC_LIMIT;
+				AllocStruct.pvPhysAddress = 0;
+				//AllocStruct.pvPhysMask = 0;
+				AllocStruct.pvKrnlAddress = 0;
+				AllocStruct.pvPhysMemLin = 0;
+				memcpy (pvIOBuffer, &AllocStruct, dwOutputBufferLength);
+				Irp->IoStatus.Information = dwOutputBufferLength;
+				Irp->IoStatus.Status = STATUS_SUCCESS;
+			}
+		}
+		else
+			Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+
+		break;
+
+	case IOCTL_WINIO_CNTGMAP:
+
+		KdPrint(("IOCTL_WINIO_CNTGMAP"));
+
+		if ((dwInputBufferLength >= 8*4) && (dwOutputBufferLength >= 8*6))
+		{
+			if (dwInputBufferLength > sizeof(AllocStruct)) dwInputBufferLength = sizeof(AllocStruct);
+			if (dwOutputBufferLength > sizeof(AllocStruct)) dwOutputBufferLength = sizeof(AllocStruct);
+			memset (&AllocStruct, 0, sizeof(AllocStruct));
+			memcpy (&AllocStruct, pvIOBuffer, dwInputBufferLength);
+
+			if ((AllocStruct.AllocIndex > 0) && (AllocStruct.AllocIndex <= WINIO_ALLOC_LIMIT)) {
+
+				if (curr_blocks[AllocStruct.AllocIndex-1].AllocIndex) {
+					UnmapContigMemory((int)AllocStruct.AllocIndex, &curr_blocks[AllocStruct.AllocIndex-1]);
+					MapContigMemory((int)AllocStruct.AllocIndex, &curr_blocks[AllocStruct.AllocIndex-1], IrpStack->FileObject);
+					memcpy (pvIOBuffer, &curr_blocks[AllocStruct.AllocIndex-1], dwOutputBufferLength);
+					Irp->IoStatus.Information = dwOutputBufferLength;
+					Irp->IoStatus.Status = STATUS_SUCCESS;
+				} else
+					Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+
+			} else
+				Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+		}
+		else
+			Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+
+		break;
+
+	case IOCTL_WINIO_CNTGUNMAP:
+
+		KdPrint(("IOCTL_WINIO_CNTGUNMAP"));
+
+		if ((dwInputBufferLength >= 8*4) && (dwOutputBufferLength >= 8*6))
+		{
+			if (dwInputBufferLength > sizeof(AllocStruct)) dwInputBufferLength = sizeof(AllocStruct);
+			if (dwOutputBufferLength > sizeof(AllocStruct)) dwOutputBufferLength = sizeof(AllocStruct);
+			memset (&AllocStruct, 0, sizeof(AllocStruct));
+			memcpy (&AllocStruct, pvIOBuffer, dwInputBufferLength);
+
+			if ((AllocStruct.AllocIndex > 0) && (AllocStruct.AllocIndex <= WINIO_ALLOC_LIMIT)) {
+
+				if (curr_blocks[AllocStruct.AllocIndex-1].AllocIndex) {
+					UnmapContigMemory((int)AllocStruct.AllocIndex, &curr_blocks[AllocStruct.AllocIndex-1]);
+					memcpy (pvIOBuffer, &curr_blocks[AllocStruct.AllocIndex-1], dwOutputBufferLength);
+					Irp->IoStatus.Information = dwOutputBufferLength;
+					Irp->IoStatus.Status = STATUS_SUCCESS;
+				} else
+					Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+
+			} else
+				Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+		}
+		else
+			Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+
+		break;
+
+	case IOCTL_WINIO_CNTGFREE:
+
+		KdPrint(("IOCTL_WINIO_CNTGFREE"));
+
+		if ((dwInputBufferLength >= 8*4) && (dwOutputBufferLength >= 8*6))
+		{
+			if (dwInputBufferLength > sizeof(AllocStruct)) dwInputBufferLength = sizeof(AllocStruct);
+			if (dwOutputBufferLength > sizeof(AllocStruct)) dwOutputBufferLength = sizeof(AllocStruct);
+			memset (&AllocStruct, 0, sizeof(AllocStruct));
+			memcpy (&AllocStruct, pvIOBuffer, dwInputBufferLength);
+
+			if ((AllocStruct.AllocIndex > 0) && (AllocStruct.AllocIndex <= WINIO_ALLOC_LIMIT)) {
+
+				UnmapContigMemory((int)AllocStruct.AllocIndex, &curr_blocks[AllocStruct.AllocIndex-1]);
+				FreeContigMemory((int)AllocStruct.AllocIndex, &curr_blocks[AllocStruct.AllocIndex-1]);
+				memcpy (pvIOBuffer, &curr_blocks[AllocStruct.AllocIndex-1], dwOutputBufferLength);
+				Irp->IoStatus.Information = dwOutputBufferLength;
+				Irp->IoStatus.Status = STATUS_SUCCESS;
+
+			} else
+				Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+		}
+		else
+			Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+
+		break;
+
 	default:
 
 		KdPrint(("ERROR: Unknown IRP_MJ_DEVICE_CONTROL"));
@@ -322,6 +530,8 @@ void WinIoUnload(IN PDRIVER_OBJECT DriverObject)
 	NTSTATUS ntStatus;
 
 	KdPrint(("Entering WinIoUnload"));
+
+	FreeContigMemoryAll();
 
 	RtlInitUnicodeString (&DeviceLinkUnicodeString, L"\\DosDevices\\WinIo");
 

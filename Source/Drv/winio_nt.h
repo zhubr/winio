@@ -13,6 +13,8 @@
 
 #define WINIO_IOCTL_INDEX 0x810
 
+#define WINIO_ALLOC_LIMIT 8
+
 // Define our own private IOCTL
 
 #define IOCTL_WINIO_MAPPHYSTOLIN     CTL_CODE(FILE_DEVICE_WINIO,  \
@@ -45,6 +47,27 @@
 	METHOD_BUFFERED,         \
 	FILE_ANY_ACCESS)
 
+
+#define IOCTL_WINIO_CNTGALLOC		 CTL_CODE(FILE_DEVICE_WINIO,  \
+	WINIO_IOCTL_INDEX + 6,   \
+	METHOD_BUFFERED,         \
+	FILE_ANY_ACCESS)
+
+#define IOCTL_WINIO_CNTGMAP		 CTL_CODE(FILE_DEVICE_WINIO,  \
+	WINIO_IOCTL_INDEX + 7,   \
+	METHOD_BUFFERED,         \
+	FILE_ANY_ACCESS)
+
+#define IOCTL_WINIO_CNTGUNMAP		 CTL_CODE(FILE_DEVICE_WINIO,  \
+	WINIO_IOCTL_INDEX + 8,   \
+	METHOD_BUFFERED,         \
+	FILE_ANY_ACCESS)
+
+#define IOCTL_WINIO_CNTGFREE		 CTL_CODE(FILE_DEVICE_WINIO,  \
+	WINIO_IOCTL_INDEX + 9,   \
+	METHOD_BUFFERED,         \
+	FILE_ANY_ACCESS)
+
 #pragma pack(push)
 #pragma pack(1)
 
@@ -55,6 +78,19 @@ struct tagPhysStruct
 	DWORD64 PhysicalMemoryHandle;
 	DWORD64 pvPhysMemLin;
 	DWORD64 pvPhysSection;
+};
+
+struct tagAllocStruct
+{
+	DWORD64 AllocIndex;
+	DWORD64 dwPhysMemSizeInBytes;
+	DWORD64 pvPhysMask;
+	DWORD64 MappingFlags;
+	DWORD64 pvPhysAddress;
+	DWORD64 pvPhysMemLin;
+	DWORD64 pvKrnlAddress;
+	DWORD64 pvFileObj;
+	DWORD64 pvMdl;
 };
 
 struct tagPortStruct

@@ -31,6 +31,86 @@ PBYTE _stdcall MapPhysToLin(tagPhysStruct &PhysStruct)
 }
 
 
+bool _stdcall AllocContigMem(tagAllocStruct &AllocStruct, DWORD StructSize)
+{
+	PBYTE pbLinAddr = NULL;
+	DWORD dwBytesReturned;
+
+	if (!IsWinIoInitialized)
+		return false;
+
+        dwBytesReturned = 0;
+	if (DeviceIoControl(hDriver, IOCTL_WINIO_CNTGALLOC, &AllocStruct,
+		StructSize, &AllocStruct, StructSize,
+		&dwBytesReturned, NULL))
+	{
+		if (dwBytesReturned > 0) return true;
+	}
+
+	return false;
+}
+
+
+bool _stdcall FreeContigMem(tagAllocStruct &AllocStruct, DWORD StructSize)
+{
+	PBYTE pbLinAddr = NULL;
+	DWORD dwBytesReturned;
+
+	if (!IsWinIoInitialized)
+		return false;
+
+        dwBytesReturned = 0;
+	if (DeviceIoControl(hDriver, IOCTL_WINIO_CNTGFREE, &AllocStruct,
+		StructSize, &AllocStruct, StructSize,
+		&dwBytesReturned, NULL))
+	{
+		if (dwBytesReturned > 0) return true;
+	}
+
+	return false;
+}
+
+
+bool _stdcall MapContigMem(tagAllocStruct &AllocStruct, DWORD StructSize)
+{
+	PBYTE pbLinAddr = NULL;
+	DWORD dwBytesReturned;
+
+	if (!IsWinIoInitialized)
+		return false;
+
+        dwBytesReturned = 0;
+	if (DeviceIoControl(hDriver, IOCTL_WINIO_CNTGMAP, &AllocStruct,
+		StructSize, &AllocStruct, StructSize,
+		&dwBytesReturned, NULL))
+	{
+		if (dwBytesReturned > 0) return true;
+	}
+
+	return false;
+}
+
+
+bool _stdcall UnmapContigMem(tagAllocStruct &AllocStruct, DWORD StructSize)
+{
+	PBYTE pbLinAddr = NULL;
+	DWORD dwBytesReturned;
+
+	if (!IsWinIoInitialized)
+		return false;
+
+        dwBytesReturned = 0;
+	if (DeviceIoControl(hDriver, IOCTL_WINIO_CNTGUNMAP, &AllocStruct,
+		StructSize, &AllocStruct, StructSize,
+		&dwBytesReturned, NULL))
+	{
+		if (dwBytesReturned > 0) return true;
+	}
+
+	return false;
+}
+
+
 bool _stdcall UnmapPhysicalMemory(tagPhysStruct &PhysStruct)
 {
 	DWORD dwBytesReturned;
